@@ -10,6 +10,7 @@ repository 'https://uz-scripts.com/scripts/uz-autoshot'
 
 shared_scripts {
     'Customize.lua',
+    'shotcar_list.lua',
 }
 
 client_scripts {
@@ -31,6 +32,6 @@ files {
 }
 
 dependencies {
-	'screenshot-basic',
+        'screenshot-basic',
     'yarn'
 }

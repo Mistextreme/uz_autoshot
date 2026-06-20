@@ -326,11 +326,30 @@ export default function App() {
     fetchNUI('cancelSingleCapture')
   }, [])
 
+  // List-mode handlers
+  const handleListCapture = useCallback(() => {
+    if (!singleEntityPreview) return
+    fetchNUI('confirmListCapture', singleEntityPreview)
+    setSingleEntityPreview(null)
+  }, [singleEntityPreview])
+
+  const handleListSkip = useCallback(() => {
+    fetchNUI('skipListModel')
+    setSingleEntityPreview(null)
+  }, [])
+
+  const handleListCancel = useCallback(() => {
+    setSingleEntityPreview(null)
+    fetchNUI('cancelListSession')
+  }, [])
+
   if (!visible && !capturing && !previewing && !recapturePreviewing && !singleEntityPreview) return null
 
   // Single entity preview (shotcar / shotprop)
   if (singleEntityPreview) {
     const Icon = singleEntityPreview.entityType === 'vehicle' ? (CAT_TYPE_ICON.vehicle) : (CAT_TYPE_ICON.object)
+    const isListMode = !!singleEntityPreview.listMode
+
     return (
       <div className="fixed inset-0 z-[9998] cursor-grab active:cursor-grabbing"
         onMouseDown={handleOrbitDown} onMouseMove={handleOrbitMove}
@@ -338,24 +357,59 @@ export default function App() {
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-[9999] animate-enter" data-no-orbit>
           <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl glass"
             style={{ border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 4px 24px rgba(0,0,0,0.6)' }}>
-            <Icon style={{ width: 12, height: 12, color: '#22c55e', flexShrink: 0 }} />
+            <Icon style={{ width: 12, height: 12, color: isListMode ? '#f59e0b' : '#22c55e', flexShrink: 0 }} />
             <span style={{ fontSize: 11, color: '#999' }}>
               <span style={{ color: '#fff', fontWeight: 700 }}>{singleEntityPreview.model}</span>
+              {isListMode && (
+                <span style={{ color: '#f59e0b', marginLeft: 6 }}>
+                  {singleEntityPreview.listIndex}/{singleEntityPreview.listTotal}
+                </span>
+              )}
             </span>
             <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.06)', flexShrink: 0 }} />
-            <button onClick={handleSingleConfirm}
-              className="flex items-center gap-1.5"
-              style={{
-                background: '#22c55e', color: '#000', border: 'none', borderRadius: 6,
-                padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
-              }}>
-              <Play style={{ width: 8, height: 8 }} />
-              Capture
-            </button>
-            <button onClick={handleSingleCancel}
-              style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', color: '#555' }}>
-              <X style={{ width: 12, height: 12 }} />
-            </button>
+
+            {isListMode ? (
+              <>
+                <button onClick={handleListCapture}
+                  className="flex items-center gap-1.5"
+                  style={{
+                    background: '#22c55e', color: '#000', border: 'none', borderRadius: 6,
+                    padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  }}>
+                  <Play style={{ width: 8, height: 8 }} />
+                  Capture
+                </button>
+                <button onClick={handleListSkip}
+                  className="flex items-center gap-1.5"
+                  style={{
+                    background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6,
+                    padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  }}>
+                  Skip
+                </button>
+                <button onClick={handleListCancel}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', color: '#555' }}
+                  title="Cancel list session">
+                  <X style={{ width: 12, height: 12 }} />
+                </button>
+              </>
+            ) : (
+              <>
+                <button onClick={handleSingleConfirm}
+                  className="flex items-center gap-1.5"
+                  style={{
+                    background: '#22c55e', color: '#000', border: 'none', borderRadius: 6,
+                    padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                  }}>
+                  <Play style={{ width: 8, height: 8 }} />
+                  Capture
+                </button>
+                <button onClick={handleSingleCancel}
+                  style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: 2, display: 'flex', color: '#555' }}>
+                  <X style={{ width: 12, height: 12 }} />
+                </button>
+              </>
+            )}
           </div>
         </div>
         <OrbitHint />
