@@ -3,6 +3,7 @@ import { Shirt, RotateCcw, X, Play } from 'lucide-react'
 import { CapturePreview, CAT_ICON_MAP, CAT_TYPE_ICON } from './components/CapturePreview'
 import { CaptureWidget }  from './components/CaptureWidget'
 import { ClothingMenu }   from './components/ClothingMenu'
+import { VehicleCustomizer } from './components/VehicleCustomizer'
 
 // ── NUI bridge ──────────────────────────────────────
 const fetchNUI = async (eventName, data = {}) => {
@@ -213,6 +214,14 @@ export default function App() {
     fetchNUI('setVehicleColor', colors)
   }, [])
 
+  const handleExtraToggle = useCallback(({ index, enabled }) => {
+    fetchNUI('applyVehicleExtra', { index, enabled })
+  }, [])
+
+  const handleModChange = useCallback(({ modType, modIndex }) => {
+    fetchNUI('applyVehicleMod', { modType, modIndex })
+  }, [])
+
   // ── Camera orbit + pan ─────────────────────────────
   const isDraggingRef  = useRef(false)
   const isPanningRef   = useRef(false)
@@ -349,11 +358,23 @@ export default function App() {
   if (singleEntityPreview) {
     const Icon = singleEntityPreview.entityType === 'vehicle' ? (CAT_TYPE_ICON.vehicle) : (CAT_TYPE_ICON.object)
     const isListMode = !!singleEntityPreview.listMode
+    const isVehicle  = singleEntityPreview.entityType === 'vehicle'
 
     return (
       <div className="fixed inset-0 z-[9998] cursor-grab active:cursor-grabbing"
         onMouseDown={handleOrbitDown} onMouseMove={handleOrbitMove}
         onMouseUp={handleOrbitUp} onMouseLeave={handleOrbitUp} onWheel={handleOrbitWheel} onContextMenu={handleContextMenu}>
+
+        {isVehicle && (
+          <VehicleCustomizer
+            key={singleEntityPreview.model}
+            customization={singleEntityPreview.customization}
+            onExtraToggle={handleExtraToggle}
+            onModChange={handleModChange}
+            onColorChange={handleColorChange}
+          />
+        )}
+
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-[9999] animate-enter" data-no-orbit>
           <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl glass"
             style={{ border: '1px solid rgba(255,255,255,0.08)', boxShadow: '0 4px 24px rgba(0,0,0,0.6)' }}>
