@@ -17,6 +17,52 @@ local entitySpawnToken  = 0  -- increments each spawn request to cancel stale on
 local listQueue         = {}   -- array of model name strings
 local listIndex         = 0    -- current position (1-based)
 local isListSession     = false
+local listEntityType    = 'vehicle'  -- 'vehicle' | 'object'
+
+-- ── Vehicle customizer helpers ───────────────────────
+local ModTypeLabels = {
+    [0]  = 'Spoilers',       [1]  = 'Front Bumper',
+    [2]  = 'Rear Bumper',    [3]  = 'Side Skirt',
+    [4]  = 'Exhaust',        [5]  = 'Frame',
+    [6]  = 'Grille',         [7]  = 'Hood',
+    [8]  = 'Fender',         [9]  = 'Right Fender',
+    [10] = 'Roof',           [11] = 'Engine',
+    [12] = 'Brakes',         [13] = 'Transmission',
+    [15] = 'Suspension',     [16] = 'Armor',
+    [22] = 'Front Wheels',   [23] = 'Rear Wheels',
+}
+
+local function GetVehicleCustomizationData(veh)
+    if not veh or not DoesEntityExist(veh) then return nil end
+
+    local extras = {}
+    for i = 0, 14 do
+        if DoesExtraExist(veh, i) then
+            extras[#extras + 1] = {
+                index   = i,
+                enabled = IsVehicleExtraTurnedOn(veh, i),
+            }
+        end
+    end
+
+    SetVehicleModKit(veh, 0)
+    local mods = {}
+    for modType, label in pairs(ModTypeLabels) do
+        local count = GetNumVehicleMods(veh, modType)
+        if count > 0 then
+            mods[#mods + 1] = {
+                modType = modType,
+                label   = label,
+                count   = count,
+                current = GetVehicleMod(veh, modType),
+            }
+        end
+    end
+    table.sort(mods, function(a, b) return a.modType < b.modType end)
+
+    local p, s = GetVehicleColours(veh)
+    return { extras = extras, mods = mods, color = { primary = p, secondary = s } }
+end
 
 -- Orbit-camera state. Declared up here so functions defined earlier in the
 -- file (CreateCaptureCamera, ...) can read the live orbit values that the
@@ -1775,6 +1821,20 @@ RegisterNUICallback('setVehicleColor', function(data, cb)
     cb('ok')
 end)
 
+RegisterNUICallback('applyVehicleExtra', function(data, cb)
+    cb('ok')
+    if not spawnedEntity or not DoesEntityExist(spawnedEntity) then return end
+    -- enabled = true → visible (disable flag = false), enabled = false → hidden (disable flag = true)
+    SetVehicleExtra(spawnedEntity, data.index, not data.enabled)
+end)
+
+RegisterNUICallback('applyVehicleMod', function(data, cb)
+    cb('ok')
+    if not spawnedEntity or not DoesEntityExist(spawnedEntity) then return end
+    SetVehicleModKit(spawnedEntity, 0)
+    SetVehicleMod(spawnedEntity, data.modType, data.modIndex, false)
+end)
+
 RegisterNUICallback('getTextures', function(data, cb)
     local ped = PlayerPedId()
     local count
@@ -1855,16 +1915,16 @@ RegisterCommand(Customize.MenuCommand, function() OpenClothingMenu() end, Custom
 -- SHOTCAR LIST SESSION HELPERS
 -- ════════════════════════════════════════════════════════
 
-local function SetupVehicleOrbitCamera()
+local function SetupOrbitCameraForPreset(presetName, defaults)
     if not spawnedEntity or not DoesEntityExist(spawnedEntity) then return false end
     local entityPos = GetEntityCoords(spawnedEntity)
-    local preset = Customize.CameraPresets['vehicle']
+    local preset = Customize.CameraPresets[presetName]
     orbitCenter   = vector3(entityPos.x, entityPos.y, entityPos.z + preset.zPos)
-    orbitBaseDist = preset.dist or 8.0
+    orbitBaseDist = preset.dist or defaults.dist
     orbitDist     = orbitBaseDist
     orbitFov      = preset.fov
-    orbitAngleH   = math.rad(preset.defaultAngleH or 225.0)
-    orbitCamZ     = preset.defaultCamZ or 1.5
+    orbitAngleH   = math.rad(preset.defaultAngleH or defaults.angleH)
+    orbitCamZ     = preset.defaultCamZ or defaults.camZ
     orbitRoll     = preset.defaultRoll or 0.0
 
     local camX = orbitCenter.x + orbitDist * math.sin(orbitAngleH)
@@ -1876,6 +1936,14 @@ local function SetupVehicleOrbitCamera()
     return true
 end
 
+local function SetupVehicleOrbitCamera()
+    return SetupOrbitCameraForPreset('vehicle', { dist = 8.0, angleH = 225.0, camZ = 1.5 })
+end
+
+local function SetupObjectOrbitCamera()
+    return SetupOrbitCameraForPreset('object', { dist = 3.0, angleH = 225.0, camZ = 0.5 })
+end
+
 local function NotifyList(msg)
     BeginTextCommandThefeedPost('STRING')
     AddTextComponentSubstringPlayerName(msg)
@@ -1883,7 +1951,7 @@ local function NotifyList(msg)
 end
 
 local function AdvanceListSession()
-    -- Delete current vehicle then spawn next one
+    -- Delete current entity then spawn next one
     DestroyOrbitCamera()
     DeleteStudioEntity()
     Wait(300)
@@ -1892,9 +1960,10 @@ local function AdvanceListSession()
 
     if listIndex > #listQueue then
         -- All done — full cleanup
-        isListSession = false
-        isPreview     = false
-        captureMode   = 'clothing'
+        isListSession    = false
+        isPreview        = false
+        captureMode      = 'clothing'
+        listEntityType   = 'vehicle'
         local ped = PlayerPedId()
         if not IsEntityVisible(ped) then SetEntityVisible(ped, true, false) end
         HideHUD(false)
@@ -1906,19 +1975,27 @@ local function AdvanceListSession()
         return
     end
 
-    -- Spawn next vehicle
-    local modelName = listQueue[listIndex]
-    SpawnStudioVehicle(modelName)
+    -- Spawn next entity (vehicle or object)
+    local modelName   = listQueue[listIndex]
+    local isVehicle   = (listEntityType == 'vehicle')
+    local setupCamera = isVehicle and SetupVehicleOrbitCamera or SetupObjectOrbitCamera
+
+    if isVehicle then
+        SpawnStudioVehicle(modelName)
+    else
+        SpawnStudioObject(modelName)
+    end
     Wait(300)
 
-    if SetupVehicleOrbitCamera() then
+    if setupCamera() then
         SendNUIMessage({
-            type       = 'singleEntityPreview',
-            model      = modelName,
-            entityType = 'vehicle',
-            listMode   = true,
-            listIndex  = listIndex,
-            listTotal  = #listQueue,
+            type          = 'singleEntityPreview',
+            model         = modelName,
+            entityType    = listEntityType,
+            listMode      = true,
+            listIndex     = listIndex,
+            listTotal     = #listQueue,
+            customization = isVehicle and GetVehicleCustomizationData(spawnedEntity) or nil,
         })
         SetNuiFocus(true, true)
     else
@@ -1977,12 +2054,13 @@ RegisterCommand('shotcar', function(_, args)
 
         if SetupVehicleOrbitCamera() then
             SendNUIMessage({
-                type       = 'singleEntityPreview',
-                model      = listQueue[1],
-                entityType = 'vehicle',
-                listMode   = true,
-                listIndex  = 1,
-                listTotal  = #listQueue,
+                type          = 'singleEntityPreview',
+                model         = listQueue[1],
+                entityType    = 'vehicle',
+                listMode      = true,
+                listIndex     = 1,
+                listTotal     = #listQueue,
+                customization = GetVehicleCustomizationData(spawnedEntity),
             })
             SetNuiFocus(true, true)
         else
@@ -2024,7 +2102,12 @@ RegisterCommand('shotcar', function(_, args)
 
     if spawnedEntity and DoesEntityExist(spawnedEntity) then
         SetupVehicleOrbitCamera()
-        SendNUIMessage({ type = 'singleEntityPreview', model = modelName, entityType = 'vehicle' })
+        SendNUIMessage({
+            type          = 'singleEntityPreview',
+            model         = modelName,
+            entityType    = 'vehicle',
+            customization = GetVehicleCustomizationData(spawnedEntity),
+        })
         SetNuiFocus(true, true)
     end
 end, Customize.AceRestricted)
@@ -2032,18 +2115,81 @@ end, Customize.AceRestricted)
 RegisterCommand('shotprop', function(_, args)
     if isCapturing or isPreview then return end
     if #args == 0 then
-        BeginTextCommandThefeedPost('STRING')
-        AddTextComponentSubstringPlayerName('Usage: /shotprop <modelname>')
-        EndTextCommandThefeedPostTicker(false, false)
+        NotifyList('Usage: /shotprop <modelname>  or  /shotprop list')
         return
     end
 
+    -- ── LIST MODE ──────────────────────────────────────
+    if args[1] == 'list' then
+        if not ShotpropList or #ShotpropList == 0 then
+            NotifyList('ShotpropList is empty. Edit shotprop_list.lua to add models.')
+            return
+        end
+
+        local valid = {}
+        for _, model in ipairs(ShotpropList) do
+            if IsModelValid(GetHashKey(model)) then
+                valid[#valid + 1] = model
+            else
+                NotifyList('Skipping invalid model: ' .. model)
+            end
+        end
+
+        if #valid == 0 then
+            NotifyList('No valid prop models found in ShotpropList.')
+            return
+        end
+
+        listQueue      = valid
+        listIndex      = 1
+        listEntityType = 'object'
+        isListSession  = true
+        isPreview      = true
+        captureMode    = 'object'
+
+        SaveFullAppearance(PlayerPedId())
+        TriggerServerEvent('uz_autoshot:server:setBucket', Customize.RoutingBucket)
+        Wait(500)
+        HideHUD(true)
+
+        local ped = PlayerPedId()
+        SetEntityCoordsNoOffset(ped, Customize.StudioCoords.x, Customize.StudioCoords.y, Customize.StudioCoords.z, false, false, false)
+        FreezeEntityPosition(ped, true)
+        SetEntityVisible(ped, false, false)
+
+        SpawnStudioObject(listQueue[1])
+        Wait(300)
+
+        if SetupObjectOrbitCamera() then
+            SendNUIMessage({
+                type       = 'singleEntityPreview',
+                model      = listQueue[1],
+                entityType = 'object',
+                listMode   = true,
+                listIndex  = 1,
+                listTotal  = #listQueue,
+            })
+            SetNuiFocus(true, true)
+        else
+            NotifyList('Failed to spawn: ' .. listQueue[1])
+            isListSession  = false
+            isPreview      = false
+            captureMode    = 'clothing'
+            listEntityType = 'vehicle'
+            local p = PlayerPedId()
+            if not IsEntityVisible(p) then SetEntityVisible(p, true, false) end
+            HideHUD(false)
+            RestoreFullAppearance()
+            TriggerServerEvent('uz_autoshot:server:resetBucket')
+        end
+        return
+    end
+
+    -- ── SINGLE MODEL MODE (original behaviour) ─────────
     local modelName = args[1]
     local hash = GetHashKey(modelName)
     if not IsModelValid(hash) then
-        BeginTextCommandThefeedPost('STRING')
-        AddTextComponentSubstringPlayerName('Invalid object model: ' .. modelName)
-        EndTextCommandThefeedPostTicker(false, false)
+        NotifyList('Invalid object model: ' .. modelName)
         return
     end
 
@@ -2129,7 +2275,9 @@ end)
 RegisterNUICallback('confirmListCapture', function(data, cb)
     cb('ok')
     if not isPreview or not spawnedEntity or not isListSession then return end
-    local model = data.model or ''
+    local model  = data.model or ''
+    local eType  = listEntityType  -- snapshot — 'vehicle' or 'object'
+    local folder = eType == 'vehicle' and 'vehicles' or 'objects'
 
     CreateThread(function()
         captureRotOffset = math.deg(orbitAngleH) - Customize.StudioHeading
@@ -2142,12 +2290,12 @@ RegisterNUICallback('confirmListCapture', function(data, cb)
         SetNuiFocus(false, false)
         Wait(300)
 
-        local preset = Customize.CameraPresets['vehicle']
+        local preset = Customize.CameraPresets[eType]
         DestroyCamera()
-        captureCamera = CreateCaptureCamera(spawnedEntity, preset, 'vehicle')
+        captureCamera = CreateCaptureCamera(spawnedEntity, preset, eType)
         Wait(Customize.WaitAfterApply)
 
-        CaptureAndUpload('vehicles/' .. model)
+        CaptureAndUpload(folder .. '/' .. model)
         SendProgress(listIndex, #listQueue, model)
 
         -- Partial cleanup — don't restore player, stay in studio
